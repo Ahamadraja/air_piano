@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Gesture Piano Web</title>
+  <style>
+    body {
+      font-family: Arial;
+      text-align: center;
+      margin-top: 40px;
+      background: #111;
+      color: white;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      opacity: 0.8;
+    }
+    #status {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+<h2>🎹 Gesture Piano </h2>
+
+<button onclick="connectSerial()">🔌 Connect Arduino</button>
+<button onclick="startReading()">▶️ Start</button>
+<button onclick="stopReading()">⏹ Stop</button>
+
+<p id="status">Status: Not connected</p>
+
+<script>
+let port;
+let reader;
+let isReading = false;
+
+// ===== AUDIO ENGINE =====
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+// 🎹 Improved Piano-like Sound
+function playNote(note) {
+  let freq = 440 * Math.pow(2, (note - 69) / 12);
+
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc1.frequency.value = freq;
+  osc2.frequency.value = freq * 2;
+
+  osc1.type = "triangle";
+  osc2.type = "sine";
+
+  osc1.connect(gain);
+  osc2.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  // Envelope (makes it sound like piano)
+  gain.gain.setValueAtTime(0, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.01); // attack
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6); // decay
+
+  osc1.start();
+  osc2.start();
+
+  osc1.stop(audioCtx.currentTime + 0.6);
+  osc2.stop(audioCtx.currentTime + 0.6);
+}
+
+// ===== CONNECT SERIAL =====
+async function connectSerial() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+
+    document.getElementById("status").innerText = "Status: Connected ✅";
+  } catch (err) {
+    alert("Connection failed: " + err);
+  }
+}
+
+// ===== START =====
+async function startReading() {
+  if (!port) {
+    alert("Please connect Arduino first!");
+    return;
+  }
+
+  if (isReading) return;
+
+  isReading = true;
+
+  const decoder = new TextDecoderStream();
+  port.readable.pipeTo(decoder.writable);
+  reader = decoder.readable.getReader();
+
+  document.getElementById("status").innerText = "Status: Running ▶️";
+
+  readLoop();
+}
+
+// ===== STOP =====
+async function stopReading() {
+  isReading = false;
+
+  if (reader) {
+    await reader.cancel();
+    reader = null;
+  }
+
+  document.getElementById("status").innerText = "Status: Stopped ⏹";
+}
+
+// ===== READ LOOP =====
+async function readLoop() {
+  while (isReading) {
+    const { value, done } = await reader.read();
+    if (done || !isReading) break;
+
+    const lines = value.split("\n");
+
+    lines.forEach(line => {
+      line = line.trim();
+      if (!line) return;
+
+      let parts = line.split(" ");
+      if (parts.length !== 2) return;
+
+      let cmd = parts[0];
+      let note = parseInt(parts[1]);
+
+      if (cmd === "ON") {
+        playNote(note);
+      }
+    });
+  }
+}
+</script>
+
+</body>
+</html>
